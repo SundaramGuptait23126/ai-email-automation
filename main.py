@@ -11,6 +11,7 @@ Endpoints:
 import os
 import sys
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -40,6 +41,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Record server startup timestamp to filter out older unread emails
+SERVER_START_TIME = int(time.time())
 
 # Lazy-load engine on startup
 engine: Optional[EmailAutomationEngine] = None
@@ -219,8 +223,8 @@ def trigger_inbox_processing(background_tasks: BackgroundTasks):
             import gmail_automation
             service = gmail_automation.get_gmail_service()
             label_id = gmail_automation.get_or_create_label(service, "AI-Replied")
-            bot_start = int(os.environ.get("BOT_START_TIMESTAMP", 0))
-            count = gmail_automation.process_inbox(service, engine, label_id, bot_start if bot_start > 0 else None)
+            bot_start = int(os.environ.get("BOT_START_TIMESTAMP", SERVER_START_TIME))
+            count = gmail_automation.process_inbox(service, engine, label_id, bot_start)
             
             latest_scan_status["status"] = "completed"
             latest_scan_status["emails_processed"] = count

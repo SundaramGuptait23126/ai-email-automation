@@ -99,6 +99,8 @@ def get_gmail_service():
                     "\n❌ Neither 'token.json' nor 'credentials.json' found! "
                     "Checked local folder and Render /etc/secrets/."
                 )
+            if "RENDER" in os.environ or os.environ.get("PORT"):
+                raise RuntimeError("Cannot launch interactive browser OAuth login on headless cloud server. A valid token.json is required.")
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
             creds = flow.run_local_server(port=0)
 
