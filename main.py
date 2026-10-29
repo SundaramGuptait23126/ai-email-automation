@@ -194,7 +194,7 @@ def get_scan_status():
     return latest_scan_status
 
 
-@app.post("/api/process-inbox")
+@app.api_route("/api/process-inbox", methods=["GET", "POST"])
 def trigger_inbox_processing(background_tasks: BackgroundTasks):
     """
     Triggers an inbox scan via Gmail API in the background to auto-reply to unread emails.
