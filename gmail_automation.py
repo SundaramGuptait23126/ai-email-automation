@@ -57,6 +57,14 @@ def resolve_secret_file(filename: str) -> Optional[Path]:
     for candidate in candidates:
         if candidate and candidate.exists():
             return candidate
+
+    # Recursive check in /etc/secrets (handles Kubernetes / Render symlinks & subdirs)
+    secrets_dir = Path("/etc/secrets")
+    if secrets_dir.exists():
+        for p in secrets_dir.rglob("*"):
+            if p.is_file() and (p.name.lower() == filename.lower() or p.name.lower().endswith(filename.lower())):
+                return p
+
     return None
 
 def get_gmail_service():
