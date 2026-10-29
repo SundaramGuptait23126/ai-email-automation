@@ -166,7 +166,7 @@ class EmailSLM(nn.Module):
     def generate(
         self,
         input_ids: torch.Tensor,
-        max_new_tokens: int = 250,
+        max_new_tokens: int = 180,
         temperature: float = 0.7,
         top_k: int = 40,
         stop_token_ids: Optional[list] = None
@@ -178,15 +178,19 @@ class EmailSLM(nn.Module):
             # Crop to context length if needed
             cond_input = input_ids if input_ids.size(1) <= self.config.max_seq_len else input_ids[:, -self.config.max_seq_len:]
             logits, _ = self(cond_input)
-            next_token_logits = logits[:, -1, :] / max(temperature, 1e-5)
+            next_token_logits = logits[:, -1, :]
 
-            # Top-K filtering
-            if top_k > 0:
-                v, _ = torch.topk(next_token_logits, min(top_k, next_token_logits.size(-1)))
-                next_token_logits[next_token_logits < v[:, [-1]]] = -float("Inf")
-
-            probs = F.softmax(next_token_logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
+            # Fast greedy decoding for low temperature (CPU optimization)
+            if temperature <= 0.05:
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            else:
+                next_token_logits = next_token_logits / max(temperature, 1e-5)
+                # Top-K filtering
+                if top_k > 0:
+                    v, _ = torch.topk(next_token_logits, min(top_k, next_token_logits.size(-1)))
+                    next_token_logits[next_token_logits < v[:, [-1]]] = -float("Inf")
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
 
             input_ids = torch.cat([input_ids, next_token], dim=-1)
 

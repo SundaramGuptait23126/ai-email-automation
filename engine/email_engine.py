@@ -56,7 +56,10 @@ class EmailAutomationEngine:
             return False
 
     def _load_pytorch_fallback(self):
+        import os
         import torch
+        if not torch.cuda.is_available():
+            torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.tokenizer = EmailTokenizer(str(self.tokenizer_path))
         ckpt = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
@@ -168,7 +171,7 @@ class EmailAutomationEngine:
         with torch.no_grad():
             output_tokens = self.model.generate(
                 input_ids,
-                max_new_tokens=250,
+                max_new_tokens=180,
                 temperature=temperature,
                 stop_token_ids=[self.tokenizer.eos_id]
             )
