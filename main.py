@@ -11,6 +11,7 @@ Endpoints:
 import os
 import sys
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -176,6 +177,23 @@ def triage_email(req: EmailTriageRequest):
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
 
 
+# Global tracker for background inbox scans
+latest_scan_status: Dict[str, Any] = {
+    "status": "idle",
+    "last_run": None,
+    "emails_processed": 0,
+    "last_message": "Ready to scan. Trigger via POST /api/process-inbox"
+}
+
+
+@app.get("/api/scan-status")
+def get_scan_status():
+    """
+    Returns the latest inbox scan status, timestamp, and number of processed emails.
+    """
+    return latest_scan_status
+
+
 @app.post("/api/process-inbox")
 def trigger_inbox_processing(background_tasks: BackgroundTasks):
     """
@@ -192,18 +210,32 @@ def trigger_inbox_processing(background_tasks: BackgroundTasks):
         )
 
     def run_gmail_worker():
+        global latest_scan_status
+        latest_scan_status["status"] = "running"
+        latest_scan_status["last_run"] = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+        latest_scan_status["last_message"] = "Inbox scan currently in progress..."
+
         try:
             import gmail_automation
             service = gmail_automation.get_gmail_service()
             label_id = gmail_automation.get_or_create_label(service, "AI-Replied")
             bot_start = int(os.environ.get("BOT_START_TIMESTAMP", 0))
-            count = gmail_automation.process_inbox(service, engine, label_id, bot_start)
+            count = gmail_automation.process_inbox(service, engine, label_id, bot_start if bot_start > 0 else None)
+            
+            latest_scan_status["status"] = "completed"
+            latest_scan_status["emails_processed"] = count
+            latest_scan_status["last_message"] = f"Processed and replied to {count} email(s)."
             print(f"✅ Background inbox scan complete. Processed {count} email(s).")
         except Exception as e:
+            latest_scan_status["status"] = "failed"
+            latest_scan_status["last_message"] = f"Error: {str(e)}"
             print(f"❌ Error during background inbox processing: {e}")
 
     background_tasks.add_task(run_gmail_worker)
-    return {"message": "Inbox scan scheduled in background task."}
+    return {
+        "message": "Inbox scan scheduled in background task.",
+        "status_check_url": "/api/scan-status"
+    }
 
 
 if __name__ == "__main__":

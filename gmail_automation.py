@@ -293,9 +293,13 @@ def send_reply(service, email_info, raw_reply_text, auto_send=True):
         return draft
 
 
-def process_inbox(service, engine, label_id, bot_start_time):
-    """Scans for unread emails arrived strictly AFTER bot start time."""
-    query = f"is:unread label:INBOX after:{bot_start_time - 30}"
+def process_inbox(service, engine, label_id, bot_start_time=None):
+    """Scans for unread emails arrived strictly AFTER bot start time (or all unread if start time not specified)."""
+    if bot_start_time and bot_start_time > 0:
+        query = f"is:unread label:INBOX after:{bot_start_time - 30}"
+    else:
+        query = "is:unread label:INBOX"
+
     res = service.users().messages().list(userId="me", q=query, maxResults=10).execute()
     messages = res.get("messages", [])
 
@@ -309,7 +313,7 @@ def process_inbox(service, engine, label_id, bot_start_time):
         email_info = parse_email_message(service, msg_id)
 
         # STRICT TIMESTAMP FILTER: Ignore any email that arrived before bot started
-        if email_info["internal_date"] < bot_start_time:
+        if bot_start_time and bot_start_time > 0 and email_info["internal_date"] < bot_start_time:
             continue
 
         processed_count += 1
