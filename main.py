@@ -106,13 +106,20 @@ def health_check():
     creds_path = resolve_secret_file("credentials.json")
     has_token_env = bool(os.environ.get("GMAIL_TOKEN_JSON"))
 
+    # Diagnostic checks for Render environment & files
+    secrets_dir = Path("/etc/secrets")
+    found_secrets = [f.name for f in secrets_dir.iterdir()] if secrets_dir.exists() else []
+    relevant_envs = [k for k in os.environ.keys() if any(w in k.lower() for w in ["token", "cred", "gmail", "secret"])]
+
     return {
         "status": "online",
         "service": "AI Email Automation Backend",
         "active_engine": engine_name,
         "checkpoint_exists": (PROJECT_ROOT / "checkpoints" / "best_email_slm.pt").exists(),
         "gmail_configured": (token_path is not None) or (creds_path is not None) or has_token_env,
-        "token_location": str(token_path) if token_path else ("env:GMAIL_TOKEN_JSON" if has_token_env else None)
+        "token_location": str(token_path) if token_path else ("env:GMAIL_TOKEN_JSON" if has_token_env else None),
+        "found_secrets_in_etc": found_secrets,
+        "matching_env_keys": relevant_envs
     }
 
 
