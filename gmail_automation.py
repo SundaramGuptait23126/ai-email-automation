@@ -12,6 +12,7 @@ Improvements:
 
 import os
 import sys
+import json
 import base64
 import time
 import re
@@ -19,6 +20,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
+from typing import Optional
 
 # Add project root
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -43,29 +45,62 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send"
 ]
 
-CREDENTIALS_FILE = PROJECT_ROOT / "credentials.json"
-TOKEN_FILE = PROJECT_ROOT / "token.json"
-
+def resolve_secret_file(filename: str) -> Optional[Path]:
+    """Finds a secret file either in PROJECT_ROOT, Render /etc/secrets, or env vars."""
+    custom_env = os.environ.get(filename.upper().replace(".", "_") + "_PATH")
+    candidates = [
+        Path(custom_env) if custom_env else None,
+        PROJECT_ROOT / filename,
+        Path("/etc/secrets") / filename,
+        Path.home() / ".credentials" / filename
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate
+    return None
 
 def get_gmail_service():
     """Authenticates and returns the Gmail API client."""
     creds = None
-    if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
+    # 1. Try reading token from environment variable (useful on Render/Cloud)
+    token_json_env = os.environ.get("GMAIL_TOKEN_JSON")
+    if token_json_env:
+        try:
+            creds_data = json.loads(token_json_env)
+            creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+        except Exception as e:
+            print(f"⚠️ Warning: Could not parse GMAIL_TOKEN_JSON environment variable: {e}")
+
+    # 2. Try loading from token.json file (PROJECT_ROOT, /etc/secrets, etc.)
+    token_file = resolve_secret_file("token.json")
+    if not creds and token_file:
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+        except Exception as e:
+            print(f"⚠️ Warning: Could not load token file from {token_file}: {e}")
+
+    # 3. Refresh or authenticate from credentials.json
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            if not CREDENTIALS_FILE.exists():
+            creds_file = resolve_secret_file("credentials.json")
+            if not creds_file:
                 raise FileNotFoundError(
-                    f"\n❌ 'credentials.json' not found at {CREDENTIALS_FILE}!\n"
+                    "\n❌ Neither 'token.json' nor 'credentials.json' found! "
+                    "Checked local folder and Render /etc/secrets/."
                 )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
             creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
+        # Attempt to save refreshed/new token if target is writable
+        save_target = token_file or (PROJECT_ROOT / "token.json")
+        try:
+            with open(save_target, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+        except Exception as e:
+            print(f"ℹ️ Note: Could not persist token to {save_target} (filesystem may be read-only): {e}")
 
     return build("gmail", "v1", credentials=creds)
 

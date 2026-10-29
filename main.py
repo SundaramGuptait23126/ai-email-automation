@@ -77,6 +77,21 @@ class EmailTriageResponse(BaseModel):
     raw_generation: Optional[str] = None
 
 
+# Helper to locate secret files across Local and Cloud (Render /etc/secrets)
+def resolve_secret_file(filename: str) -> Optional[Path]:
+    """Finds a secret file either in PROJECT_ROOT, Render /etc/secrets, or env vars."""
+    custom_env = os.environ.get(filename.upper().replace(".", "_") + "_PATH")
+    candidates = [
+        Path(custom_env) if custom_env else None,
+        PROJECT_ROOT / filename,
+        Path("/etc/secrets") / filename,
+        Path.home() / ".credentials" / filename
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate
+    return None
+
 # ------------------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------------------
@@ -87,12 +102,17 @@ def health_check():
     if engine:
         engine_name = f"Ollama ({engine.model_name})" if engine.use_ollama else "Local Custom PyTorch SLM (2.23M)"
 
+    token_path = resolve_secret_file("token.json")
+    creds_path = resolve_secret_file("credentials.json")
+    has_token_env = bool(os.environ.get("GMAIL_TOKEN_JSON"))
+
     return {
         "status": "online",
         "service": "AI Email Automation Backend",
         "active_engine": engine_name,
         "checkpoint_exists": (PROJECT_ROOT / "checkpoints" / "best_email_slm.pt").exists(),
-        "gmail_configured": (PROJECT_ROOT / "token.json").exists() or (PROJECT_ROOT / "credentials.json").exists()
+        "gmail_configured": (token_path is not None) or (creds_path is not None) or has_token_env,
+        "token_location": str(token_path) if token_path else ("env:GMAIL_TOKEN_JSON" if has_token_env else None)
     }
 
 
@@ -142,11 +162,14 @@ def trigger_inbox_processing(background_tasks: BackgroundTasks):
     """
     Triggers an inbox scan via Gmail API in the background to auto-reply to unread emails.
     """
-    token_file = PROJECT_ROOT / "token.json"
-    if not token_file.exists():
+    token_path = resolve_secret_file("token.json")
+    creds_path = resolve_secret_file("credentials.json")
+    has_token_env = bool(os.environ.get("GMAIL_TOKEN_JSON"))
+
+    if not token_path and not creds_path and not has_token_env:
         raise HTTPException(
             status_code=400,
-            detail="Gmail credentials (token.json) not found on server. Please configure Gmail authentication first."
+            detail="Gmail credentials (token.json) not found on server (/etc/secrets/token.json or local). Please configure Gmail authentication first."
         )
 
     def run_gmail_worker():
